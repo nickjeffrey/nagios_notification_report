@@ -22,6 +22,6 @@ It is assumed that this script runs Monday-Friday on the nagios server from the 
 
 # Sample Output
 
-Refer to the nagios_notification_report.html file at https://htmlpreview.github.io/?https://github.com/nickjeffrey/nagios_notification_report/main/nagios_notification_report.html
+Refer to the nagios_notification_report.html file at <a href=https://htmlpreview.github.io/?https://github.com/nickjeffrey/nagios_notification_report/main/nagios_notification_report.html> https://htmlpreview.github.io/?https://github.com/nickjeffrey/nagios_notification_report/main/nagios_notification_report.html </a>
 
 
