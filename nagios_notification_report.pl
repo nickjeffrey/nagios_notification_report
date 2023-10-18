@@ -7,6 +7,7 @@
 # 2022-12-22	njeffrey	Script created
 # 2022-12-26	njeffrey	Add --disabledonly parameter
 # 2023-10-16	njeffrey	Add a column to the report that shows if a service is in a period of scheduled downtime
+# 2023-10-18	njeffrey	Add a column to include comments for host downtime / service downtime
 
 
 
@@ -31,7 +32,7 @@ my ($count,$status_dat,%hosts,%services);
 my ($opt_h,$opt_v,$opt_d);
 my ($disabledonly);
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst);
-my ($is_in_effect,$end_time,$service_description);
+my ($is_in_effect,$end_time,$service_description,$host_comment,$service_comment);
 $verbose               = "no";									#yes/no flag to increase verbosity for debugging
 $sendmail              = "/usr/sbin/sendmail"; 		 					#location of binary
 $output_file           = "/home/nagios/nagios_notification_report.html";			#location of file
@@ -271,6 +272,10 @@ sub read_status_dat {
             print     ",$_" if ($verbose eq "yes");						#write out to screen
             print OUT ",$_";									#write out to temporary file
          }
+         if (/comment=/) {
+            print     ",$_" if ($verbose eq "yes");						#write out to screen
+            print OUT ",$_";									#write out to temporary file
+         }
       }
    }                                                                    			#end of while loop
    close IN;                                                          		  		#close filehandle
@@ -323,9 +328,9 @@ sub get_host_downtime_details {
    print "running get_host_downtime_details subroutine \n" if ($verbose eq "yes");
    #
    # At this point, the details of each service have  been parsed into a temporary file that looks similar to the following:
-   # hostdowntime { host_name=host1.example.com   is_in_effect=1        end_time=1697480735 }
-   # hostdowntime { host_name=host2.example.com   is_in_effect=1        end_time=1697480735 }
-   # hostdowntime { host_name=host3.example.com   is_in_effect=1        end_time=1697480735 }
+   # hostdowntime { host_name=host1.example.com   is_in_effect=1        end_time=1697480735  comment=blah blah blah, }
+   # hostdowntime { host_name=host2.example.com   is_in_effect=1        end_time=1697480735  comment=foo! bar! baz!, }
+   # hostdowntime { host_name=host3.example.com   is_in_effect=1        end_time=1697480735  comment=blah blah blah, }
    #
    #
    open(IN,"$temp_file") or die "Cannot open $temp_file file for reading $! \n"; 		#open filehandle
@@ -337,6 +342,11 @@ sub get_host_downtime_details {
          $is_in_effect         = "yes" if (/,is_in_effect=1/);					#save to hash 0=disabled 1=enabled
          $end_time             = 0; 								#default to 0 because the stanza in status.dat will not exist
          $end_time             = $1    if (/,end_time=([0-9]+)/);				#save to hash 
+         $host_comment         = "";   								#initialize hash element to avoid undef errors
+         $host_comment         = $1    if (/,comment=(.*)/);					#parse out any comment provided by the nagios sysadmin 
+         $host_comment         =~ s/,//g;							#remove any embedded commas in the free-form comment field to make later regex easier
+         $host_comment         =~ s/{//g;							#remove any embedded {      in the free-form comment field to make later regex easier
+         $host_comment         =~ s/}//g;							#remove any embedded }      in the free-form comment field to make later regex easier
          #
          # convert $end_time from seconds since epoch to human readable time
          if ($end_time > 0) {
@@ -350,10 +360,12 @@ sub get_host_downtime_details {
             if ( "$host" eq "$hosts{$key}{host_name}" ) {					#confirm the host_name matches
                $hosts{$key}{is_in_effect} = $is_in_effect;
                $hosts{$key}{end_time}     = $end_time;
+               $hosts{$key}{host_comment} = $host_comment;
                if ($verbose eq "yes") {
                   print "   hostname=$hosts{$key}{host_name} ";
                   print "   is_in_effect=$hosts{$key}{is_in_effect} ";
                   print "   end_time=$hosts{$key}{end_time} ";
+                  print "   host_comment=$hosts{$key}{host_comment} ";
                   print "   \n";
                }
             }
@@ -439,9 +451,9 @@ sub get_service_downtime_details {
    print "running get_service_downtime_details subroutine \n" if ($verbose eq "yes");
    #
    # At this point, the details of each service have  been parsed into a temporary file that looks similar to the following:
-   # servicedowntime { host_name=host1.example.com   service_description=ping        is_in_effect=1        end_time=1697480735 }
-   # servicedowntime { host_name=host2.example.com   service_description=CPU util    is_in_effect=1        end_time=1697480735 }
-   # servicedowntime { host_name=host3.example.com   service_description=SNMP        is_in_effect=1        end_time=1697480735 }
+   # servicedowntime { host_name=host1.example.com   service_description=ping        is_in_effect=1        end_time=1697480735   comment=blah blah blah }
+   # servicedowntime { host_name=host2.example.com   service_description=CPU util    is_in_effect=1        end_time=1697480735   comment=foo! bar@ baz% }
+   # servicedowntime { host_name=host3.example.com   service_description=SNMP        is_in_effect=1        end_time=1697480735   comment=blah blah blah }
    #
    #
    open(IN,"$temp_file") or die "Cannot open $temp_file file for reading $! \n"; 		#open filehandle
@@ -454,6 +466,12 @@ sub get_service_downtime_details {
          $end_time             = 0; 								#default to 0 because the stanza in status.dat will not exist
          $end_time             = $1    if (/,end_time=([0-9]+)/);					#save to hash 
          $service_description  = $1    if (/,service_description=([a-zA-Z0-9_\.\-\/\\ ]+),/);					#save to hash 
+         $service_comment      = "";                                                            #initialize hash element to avoid undef errors
+         $service_comment      = $1    if (/,comment=(.*)/);                                    #parse out any comment provided by the nagios sysadmin
+         $service_comment      =~ s/,//g;                                                       #remove any embedded commas in the free-form comment field to make later regex easier
+         $service_comment      =~ s/{//g;                                                       #remove any embedded {      in the free-form comment field to make later regex easier
+         $service_comment      =~ s/}//g;                                                       #remove any embedded }      in the free-form comment field to make later regex easier
+
          #
          # convert $end_time from seconds since epoch to human readable time
          if ($end_time > 0) {
@@ -467,13 +485,15 @@ sub get_service_downtime_details {
             foreach my $key2 ( sort keys %{$services{$key}} ) {
                if ( "$host" eq "$services{$key}{$key2}{host_name}" ) {					#confirm the host_name and service_description match
                   if ( "$service_description" eq "$services{$key}{$key2}{service_description}" ) {		#confirm the host_name and service_description match
-                     $services{$key}{$key2}{is_in_effect} = $is_in_effect;
-                     $services{$key}{$key2}{end_time}     = $end_time;
+                     $services{$key}{$key2}{is_in_effect}    = $is_in_effect;
+                     $services{$key}{$key2}{end_time}        = $end_time;
+                     $services{$key}{$key2}{service_comment} = $service_comment;
                      if ($verbose eq "yes") {
                         print "   hostname=$services{$key}{$key2}{host_name} ";
                         print "   service_description=$services{$key}{$key2}{service_description} ";
                         print "   is_in_effect=$services{$key}{$key2}{is_in_effect} ";
                         print "   end_time=$services{$key}{$key2}{end_time} ";
+                        print "   service_comment=$services{$key}{$key2}{service_comment} ";
                         print "   \n";
                      }
                   }
@@ -499,6 +519,7 @@ sub generate_html_report_header {
    print OUT "<hr> \n";
    print OUT "<br><b>How to use this report</b> \n";
    print OUT "<br>    <li>This daily report is to remind the nagios sysadmins to re-enable any notifications that may have been accidentally turned off. \n";
+   print OUT "<br>    <li>HINT: use the --disabled only parameter in the cron job to skip all the <font color=green> green </font> results, only showing <font color=red> red </font> results to cut down on the size of the report. \n";
    print OUT "<br>    <li>If you see any <font color=red>red</font> warnings, please login to nagios at $monitoring_system_url to confirm that those notifications are supposed to be disabled. \n";
    print OUT "<br>    <li>If you do not see any <font color=red>red</font> warnings, no further action is needed. \n";
    print OUT "</ul><hr> \n";
@@ -514,10 +535,10 @@ sub generate_html_report_hosts {
    # Create the HTML table for all the nagios hosts
    #
    print OUT "<table border=1> \n";
-   print OUT "<tr bgcolor=gray><td colspan=4> Nagios hosts \n";
-   print OUT "<tr bgcolor=gray><td> Hostname <td> Notification Period <td> Notifications Enabled <td> In Scheduled Downtime \n";
+   print OUT "<tr bgcolor=gray><td colspan=5> Nagios hosts \n";
+   print OUT "<tr bgcolor=gray><td> Hostname <td> Notification Period <td> Notifications Enabled <td> In Scheduled Downtime <td> Comment \n";
    foreach $key (sort keys %hosts) {
-      next if ( ($disabledonly eq "yes") && ($hosts{$key}{notifications_enabled} eq "yes") );  #skip any enabled hosts if the --disabledonly parameter was provided
+      next if ( ($disabledonly eq "yes") && ($hosts{$key}{notifications_enabled} eq "yes") && ($hosts{$key}{is_in_effect} eq "no") );  #skip any enabled hosts if the --disabledonly parameter was provided
       #
       # print hostname field in table row
       #
@@ -549,6 +570,12 @@ sub generate_html_report_hosts {
       } else {
          print OUT "    <td bgcolor=$bgcolor> $hosts{$key}{is_in_effect} \n";
       } 											#end of if/else block
+      #
+      # print any optional comment that exists in the status.dat file
+      #
+      $bgcolor = "white";								#initialize variable
+      $hosts{$key}{host_comment} = " "  unless ($hosts{$key}{host_comment});
+      print OUT "    <td bgcolor=$bgcolor> $hosts{$key}{host_comment} \n";
    } 											#end of foreach loop
    # print HTML table footer 
    print OUT "</table><p>\&nbsp\;</p> \n";
@@ -560,12 +587,12 @@ sub generate_html_report_hosts {
 sub generate_html_report_services {
    #
    print OUT "<table border=1> \n";
-   print OUT "<tr bgcolor=gray><td colspan=5> Nagios services \n";
-   print OUT "<tr bgcolor=gray><td> Hostname <td> Service Description <td> Notification Period <td> Notifications Enabled <td> In Scheduled Downtime \n";
+   print OUT "<tr bgcolor=gray><td colspan=6> Nagios services \n";
+   print OUT "<tr bgcolor=gray><td> Hostname <td> Service Description <td> Notification Period <td> Notifications Enabled <td> In Scheduled Downtime <td> Comment\n";
    foreach my $key ( sort keys %services ) {
       foreach my $key2 ( sort keys %{$services{$key}} ) {
          #
-         next if ( ($disabledonly eq "yes") && ($services{$key}{$key2}{notifications_enabled} eq "yes") );  #skip any enabled services if the --disabledonly parameter was provided
+         next if ( ($disabledonly eq "yes") && ($services{$key}{$key2}{notifications_enabled} eq "yes") && ($services{$key}{$key2}{is_in_effect} eq "no") );  #skip any enabled services if the --disabledonly parameter was used
          #
          # print hostname field in table row
          #
@@ -604,6 +631,12 @@ sub generate_html_report_services {
          } else {
             print OUT "    <td bgcolor=$bgcolor> $services{$key}{$key2}{is_in_effect} \n";
          } 											#end of if/else block
+         #
+         # print any optional comment that exists in the status.dat file
+         #
+         $bgcolor = "white";								#initialize variable
+         $services{$key}{$key2}{service_comment} = " "  unless ($services{$key}{$key2}{service_comment});
+         print OUT "    <td bgcolor=$bgcolor> $services{$key}{$key2}{service_comment} \n";
       } 											#end of foreach loop
    } 											#end of foreach loop
    # print HTML table footer 
