@@ -8,6 +8,7 @@
 # 2022-12-26	njeffrey	Add --disabledonly parameter
 # 2023-10-16	njeffrey	Add a column to the report that shows if a service is in a period of scheduled downtime
 # 2023-10-18	njeffrey	Add a column to include comments for host downtime / service downtime
+# 2023-11-38	njeffrey	Regex bugfix, embedded curly braces in plugin_output line of status.dat causing unintentional matches
 
 
 
@@ -230,6 +231,8 @@ sub read_status_dat {
    open(OUT,">>$temp_file") or die "Cannot open $temp_file for appending $! \n";
    open(IN,"$status_dat") or die "Cannot open $status_dat file for reading $! \n"; 		#open filehandle
    while (<IN>) {                                                      		 		#read a line from the command output
+      next if (/plugin_output=/);								#this line sometimes contains reserved characters such as "{} and is not needed
+      next if (/long_plugin_output=/);								#this line sometimes contains reserved characters such as "{} and is not needed
       if (/\{$/){										#find lines that end with the { character
          chomp;											#remove newline 
          print     "\n"    if ($verbose eq "yes");						#write out to screen
@@ -248,6 +251,9 @@ sub read_status_dat {
       if (/^\t/) {										#if line begins with tab character
          chomp;											#remove newline 
          s/\t//g;										#get rid of leading tab character
+         s/\"//g;										#get rid of " characters
+         s/\{//g;										#get rid of { characters
+         s/\}//g;										#get rid of } characters
          if (/host_name=/) {
             print     ",$_" if ($verbose eq "yes");						#write out to screen
             print OUT ",$_";									#write out to temporary file
@@ -392,7 +398,7 @@ sub get_service_notification_details {
    $count = 0;												#initialize counter variable
    open(IN,"$temp_file") or die "Cannot open $temp_file file for reading $! \n"; 			#open filehandle
    while (<IN>) {                                                      		 			#read a line from the command output
-      if (/^servicestatus/){							#find lines that end with the { character
+      if (/^servicestatus/){										#find lines that begin with servicestatus
          #
          # parse out the hostname
          #
